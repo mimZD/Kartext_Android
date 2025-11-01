@@ -42,14 +42,13 @@ class DayDetailsActivity : AppCompatActivity() {
     private var timestamp: Long = 0
     private lateinit var fabAddRecord: FloatingActionButton
     private lateinit var sharedPreferences: SharedPreferences
-    private var token: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_day_details)
 
         sharedPreferences = getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
-        token = sharedPreferences.getString("token", null)
+        val token = sharedPreferences.getString("token", null)
 
         if (token == null) {
             handleAuthFailure(false)
@@ -90,7 +89,10 @@ class DayDetailsActivity : AppCompatActivity() {
         }
     }
 
-    private fun getAuthToken(): String = "Bearer $token"
+    private fun getAuthToken(): String {
+        val token = sharedPreferences.getString("token", "")
+        return "Bearer $token"
+    }
 
     private fun handleAuthFailure(showToast: Boolean = true) {
         sharedPreferences.edit().remove("token").apply()
@@ -118,7 +120,7 @@ class DayDetailsActivity : AppCompatActivity() {
             try {
                 val response = RetrofitClient.instance.deleteLog(getAuthToken(), record.id)
                 if (response.isSuccessful) {
-                    database.logDao().deleteLogById(record.id.toLong())
+                    database.logDao().deleteLogById(record.id)
                     records.removeAt(position)
                     adapter.notifyItemRemoved(position)
                     Toast.makeText(this@DayDetailsActivity, "رکورد حذف شد", Toast.LENGTH_SHORT).show()
@@ -150,7 +152,7 @@ class DayDetailsActivity : AppCompatActivity() {
 
         val savedLogs = database.logDao().getLogsBetween(startOfDay.time, endOfDay.time)
         records.clear()
-        records.addAll(savedLogs.map { Record(id = it.id.toString(), enterTime = it.enterTime, exitTime = it.exitTime, deductions = it.deductions, type = it.type) })
+        records.addAll(savedLogs.map { Record(id = it.id, enterTime = it.enterTime, exitTime = it.exitTime, deductions = it.deductions, type = it.type) })
         adapter.notifyDataSetChanged()
     }
 
@@ -209,7 +211,7 @@ class DayDetailsActivity : AppCompatActivity() {
             try {
                 val response = RetrofitClient.instance.updateLog(getAuthToken(), record.id, record)
                 if (response.isSuccessful) {
-                    database.logDao().updateLog(LogEntity(record.id.toLong(), record.enterTime, record.exitTime, record.deductions, record.type))
+                    database.logDao().updateLog(LogEntity(record.id, record.enterTime, record.exitTime, record.deductions, record.type ?: RecordType.WORK))
                     fetchRecords()
                 } else if (response.code() == 401 || response.code() == 403) {
                     handleAuthFailure()
@@ -269,7 +271,7 @@ class DayDetailsActivity : AppCompatActivity() {
                         val response = RetrofitClient.instance.addLog(getAuthToken(), newRecord)
                         if(response.isSuccessful && response.body() != null) {
                             val createdRecord = response.body()!!
-                            database.logDao().insertLog(LogEntity(id = createdRecord.id.toLong(), enterTime = createdRecord.enterTime, exitTime = createdRecord.exitTime, deductions = createdRecord.deductions, type = createdRecord.type))
+                            database.logDao().insertLog(LogEntity(id = createdRecord.id, enterTime = createdRecord.enterTime, exitTime = createdRecord.exitTime, deductions = createdRecord.deductions, type = createdRecord.type ?: RecordType.WORK))
                             fetchRecords()
                         } else if (response.code() == 401 || response.code() == 403) {
                             handleAuthFailure()
@@ -301,7 +303,7 @@ class DayDetailsActivity : AppCompatActivity() {
             }
 
             override fun onChildDraw(c: Canvas, recyclerView: RecyclerView, viewHolder: RecyclerView.ViewHolder, dX: Float, dY: Float, actionState: Int, isCurrentlyActive: Boolean) {
-                super.onChildDraw(c, recyclerView, viewHolder, dX, dY, actionState, isCurrentlyActive)
+              super.onChildDraw(c, recyclerView, viewHolder, dX, dY, actionState, isCurrentlyActive)
 
                 if (records.getOrNull(viewHolder.adapterPosition)?.type != RecordType.WORK) return
 

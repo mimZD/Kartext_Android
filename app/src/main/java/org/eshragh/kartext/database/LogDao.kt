@@ -10,7 +10,7 @@ import androidx.room.Update
 @Dao
 interface LogDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun insertLog(log: LogEntity): Long
+    suspend fun insertLog(log: LogEntity)
 
     @Update
     suspend fun updateLog(log: LogEntity)
@@ -25,7 +25,7 @@ interface LogDao {
     suspend fun getLastUnfinishedLog(): LogEntity?
 
     @Query("DELETE FROM logs WHERE id = :logId")
-    suspend fun deleteLogById(logId: Long)
+    suspend fun deleteLogById(logId: String)
 
     @Query("DELETE FROM logs")
     suspend fun clearAll()

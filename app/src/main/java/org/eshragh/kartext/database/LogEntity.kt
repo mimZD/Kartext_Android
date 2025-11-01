@@ -6,8 +6,8 @@ import org.eshragh.kartext.models.RecordType
 
 @Entity(tableName = "logs")
 data class LogEntity(
-    @PrimaryKey(autoGenerate = false)
-    val id: Long,
+    @PrimaryKey
+    val id: String,
     var enterTime: Long,
     var exitTime: Long? = null,
     var deductions: Long = 0,

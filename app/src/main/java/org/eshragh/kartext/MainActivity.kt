@@ -9,6 +9,7 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.drawable.ColorDrawable
 import android.os.Bundle
+import android.util.Log
 import android.view.MenuItem
 import android.view.View
 import android.view.animation.AnimationUtils
@@ -42,6 +43,8 @@ import java.util.concurrent.TimeUnit
 
 class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelectedListener {
 
+    private val TAG = "KartextDebug_Main"
+
     private lateinit var drawerLayout: DrawerLayout
     private lateinit var rvRecords: RecyclerView
     private lateinit var tvUserStatus: TextView
@@ -54,20 +57,17 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     private lateinit var adapter: RecordAdapter
     private lateinit var database: AppDatabase
     private var isEntry = true
-    private var token: String? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        Log.d(TAG, "onCreate called")
         setContentView(R.layout.activity_main)
 
         database = AppDatabase.getDatabase(this)
         sharedPreferences = getSharedPreferences("auth_prefs", Context.MODE_PRIVATE)
-        token = sharedPreferences.getString("token", null)
 
-        if (token == null) {
-            handleAuthFailure(false) // Don't show toast if not logged in at all
-            return
-        }
+        // Trust that this activity is only started when logged in.
+        // Initialize all UI components.
 
         drawerLayout = findViewById(R.id.drawer_layout)
         val toolbar = findViewById<Toolbar>(R.id.toolbar)
@@ -116,16 +116,25 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
     override fun onResume() {
         super.onResume()
+        Log.d(TAG, "onResume called. Fetching records.")
+        // The only check needed is if the token has expired, which will be handled by the API call.
         fetchRecords()
     }
-    
-    private fun getAuthToken(): String = "Bearer $token"
+
+    private fun getAuthToken(): String {
+        val token = sharedPreferences.getString("token", "") // Read fresh token
+        return "Bearer $token"
+    }
 
     private fun handleAuthFailure(showToast: Boolean = true) {
-        sharedPreferences.edit().remove("token").apply()
+        Log.w(TAG, "handleAuthFailure called. Redirecting to LoginActivity.")
+        // Clear the token that is no longer valid
+        sharedPreferences.edit().remove("token").commit()
+        
         val intent = Intent(this, LoginActivity::class.java)
         intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
         startActivity(intent)
+        finish()
         if (showToast) {
             Toast.makeText(this, "نشست شما منقضی شده است. لطفاً دوباره وارد شوید.", Toast.LENGTH_LONG).show()
         }
@@ -139,7 +148,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
                     val response = RetrofitClient.instance.addLog(getAuthToken(), newRecord)
                     if(response.isSuccessful && response.body() != null) {
                         val createdRecord = response.body()!!
-                        database.logDao().insertLog(LogEntity(id = createdRecord.id.toLong(), enterTime = createdRecord.enterTime, exitTime = createdRecord.exitTime, deductions = createdRecord.deductions, type = createdRecord.type))
+                        database.logDao().insertLog(LogEntity(id = createdRecord.id, enterTime = createdRecord.enterTime, exitTime = createdRecord.exitTime, deductions = createdRecord.deductions, type = createdRecord.type ?: RecordType.WORK))
                         fetchRecords()
                     } else if (response.code() == 401 || response.code() == 403) {
                         handleAuthFailure()
@@ -170,13 +179,18 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
     }
 
     private fun fetchRecords() {
+        if (!::adapter.isInitialized) {
+            Log.e(TAG, "fetchRecords called but adapter is not initialized!")
+            return
+        }
+
         lifecycleScope.launch {
             try {
                 val response = RetrofitClient.instance.getLogs(getAuthToken())
                 if(response.isSuccessful && response.body() != null) {
                     val serverRecords = response.body()!!
                     val logEntities = serverRecords.map { 
-                        LogEntity(id = it.id.toLong(), enterTime = it.enterTime, exitTime = it.exitTime, deductions = it.deductions, type = it.type) 
+                        LogEntity(id = it.id, enterTime = it.enterTime, exitTime = it.exitTime, deductions = it.deductions, type = it.type ?: RecordType.WORK) 
                     }
                     database.logDao().clearAndInsert(logEntities)
                 } else if (response.code() == 401 || response.code() == 403) {
@@ -189,7 +203,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
 
                 val savedLogs = database.logDao().getLogsBetween(startOfDay.time, endOfDay.time)
                 records.clear()
-                records.addAll(savedLogs.map { Record(id = it.id.toString(), enterTime = it.enterTime, exitTime = it.exitTime, deductions = it.deductions, type = it.type) })
+                records.addAll(savedLogs.map { Record(id = it.id, enterTime = it.enterTime, exitTime = it.exitTime, deductions = it.deductions, type = it.type) })
                 adapter.notifyDataSetChanged()
 
                 val lastUnfinishedLog = database.logDao().getLastUnfinishedLog()
@@ -220,7 +234,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             try {
                 val response = RetrofitClient.instance.deleteLog(getAuthToken(), record.id)
                 if (response.isSuccessful) {
-                    database.logDao().deleteLogById(record.id.toLong())
+                    database.logDao().deleteLogById(record.id)
                     records.removeAt(position)
                     adapter.notifyItemRemoved(position)
                     Toast.makeText(this@MainActivity, "رکورد حذف شد", Toast.LENGTH_SHORT).show()
@@ -243,7 +257,9 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             R.id.nav_archive -> startActivity(Intent(this, ArchiveLandingActivity::class.java))
             R.id.nav_request_leave -> startActivity(Intent(this, RequestLeaveActivity::class.java))
             R.id.nav_logout -> {
-                sharedPreferences.edit().remove("token").apply()
+                // Clear the token and redirect to login
+                Log.d(TAG, "Logout clicked. Clearing token.")
+                sharedPreferences.edit().remove("token").commit()
                 handleAuthFailure(false)
             }
         }
@@ -286,7 +302,7 @@ class MainActivity : AppCompatActivity(), NavigationView.OnNavigationItemSelecte
             try {
                 val response = RetrofitClient.instance.updateLog(getAuthToken(), record.id, record)
                 if (response.isSuccessful) {
-                    database.logDao().updateLog(LogEntity(record.id.toLong(), record.enterTime, record.exitTime, record.deductions, record.type))
+                    database.logDao().updateLog(LogEntity(record.id, record.enterTime, record.exitTime, record.deductions, record.type ?: RecordType.WORK))
                     fetchRecords()
                 } else if (response.code() == 401 || response.code() == 403) {
                     handleAuthFailure()
